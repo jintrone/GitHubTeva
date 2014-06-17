@@ -5,9 +5,6 @@ import edu.mit.cci.teva.engine.CommunityModel
 import edu.mit.cci.teva.engine.TevaParameters
 import edu.mit.cci.teva.model.Conversation
 import edu.mit.cci.teva.util.TevaUtils
-import edu.mit.cci.teva.util.WindowablePostAdapter
-import edu.mit.cci.text.windowing.WindowStrategy
-import edu.mit.cci.text.windowing.Windowable
 import edu.mit.cci.util.U
 import groovy.sql.Sql
 

@@ -1,8 +1,7 @@
-package org.msu.mi.teva.github
+package org.msu.mi.teva.github.util
 
 import edu.mit.cci.adapters.csv.PostImpl
 import edu.mit.cci.teva.model.Conversation
-import edu.mit.cci.teva.model.Post
 import groovy.sql.Sql
 import groovy.util.logging.Log4j
 import groovyx.net.http.RESTClient
@@ -16,7 +15,7 @@ import org.apache.http.protocol.HttpContext
  * Created by josh on 2/7/14.
  */
 @Log4j
-class GitHubUtils {
+class GitHubApiUtils {
 
     static boolean cont = false
 
@@ -30,6 +29,8 @@ class GitHubUtils {
             cont = true
         }
     }
+
+
 
     def static addIssueComments(Conversation c) {
         String user = System.getProperty("mysql.remote.username")
@@ -129,7 +130,7 @@ class GitHubUtils {
 
     }
 
-    def static List getProjects(Sql sql) {
+    def static List getTransformedProjects(Sql sql) {
         def getProjects = "select pull_requests.base_repo_id r_id, users.login owner, projects.`name` repo_name from pull_requests inner join projects on projects.id=pull_requests.base_repo_id inner join users on projects.`owner_id` = users.id group by r_id order by r_id"
         sql.rows(getProjects).collect() {
             if (it.owner == "robey" && it.repo_name == "kestrel") {
@@ -156,7 +157,7 @@ class GitHubUtils {
             }
 
             if (response.headers.'X-RateLimit-Remaining' == "1") {
-                def reset = new Date((response.headers.'X-RateLimte-Remaining' as Long) * 1000l)
+                def reset = new Date((response.headers.'X-RateLimit-Reset' as Long) * 1000l)
                 String msg = "Reached rate limit on page ${p} of ${user}/${repo}. Will reset at ${reset}"
                 log.warn("Reached rate limit on page ${p} of ${user}/${repo}. Will reset at ${reset}")
                 new File("RateLimited.txt").withWriter {
@@ -176,7 +177,69 @@ class GitHubUtils {
         result
     }
 
-    def static populatePullRequestBodies() {
+    static List getRepoCommitComments(RESTClient rest, String user, String repo) {
+        def result = []
+        result.getMetaClass().ratelimited = false
+        def p = 0
+        while (true) {
+            log.info("Getting page ${++p} repo ${user}/${repo}")
+
+            def response = rest.get([path: "/repos/${user}/${repo}/comments",
+                    query: [per_page: 100, page: p, state: "all"],
+                    headers: ["User-Agent": "jintrone-comment-slurper"]])
+            dumpHeaders(response)
+            result += response.data.collect {
+                [body: it.body, id: it.id as Long, user: it.user.id as Long, path: it.path, position: it.position as Integer, line: it.line as Integer, sha: it.commit_id, time: Date.parse("yyyy-MM-dd'T'HH:mm:ss'Z'", it.created_at)]
+            }
+
+            if (response.headers.'X-RateLimit-Remaining' == "1") {
+                def reset = new Date((response.headers.'X-RateLimit-Reset' as Long) * 1000l)
+                String msg = "Reached rate limit on page ${p} of ${user}/${repo}. Will reset at ${reset}"
+                log.warn("Reached rate limit on page ${p} of ${user}/${repo}. Will reset at ${reset}")
+                new File("RateLimited.txt").withWriter {
+                    it.println "Owner:${user}"
+                    it.println "Repo:${repo}"
+                    it.println "LastPageRead:${p}"
+                    it.println "Reset:${reset}"
+                }
+                System.exit(-1)
+                break
+            }
+
+            if (!response.headers.'Link' || !response.headers.'Link'.contains(/; rel="last"/)) {
+                break
+            }
+        }
+        result
+    }
+
+    def static populateCommitMessages() {
+
+    }
+
+    def static populateCommitComments() {
+        def c = setup()
+        def insert = "insert into commit_comments_fixed (path,user_id,body,line,position,comment_id,sha,created_at)" +
+                " values (?,?,?,?,?,?,?,?)"
+        c.write.connection.autoCommit = false;
+        c.projects.each {
+            List result = getRepoCommitComments(c.rest, it.owner, it.repo_name);
+
+            c.write.withBatch(insert) { ps ->
+                result.each { m ->
+                    ps.addBatch(m.path, m.user, m.body, m.line, m.position, m.id, m.sha, m.time)
+                }
+            }
+            c.write.commit()
+
+
+            log.info("Done processing ${it.owner}/${it.repo_name}")
+
+        }
+    }
+
+
+    static Map setup() {
         String user = System.getProperty("mysql.local.user")
         String pass = System.getProperty("mysql.local.pass")
         String host = System.getProperty("mysql.local.host")
@@ -187,32 +250,38 @@ class GitHubUtils {
         log.info("Connection: ${cnx}")
 
         Sql read = Sql.newInstance(cnx, user, pass, 'com.mysql.jdbc.Driver')
-        List projects = getProjects(read)
-
-        String pid = "select id, pullreq_id pr_id from pull_requests where pull_requests.base_repo_id=? order by pr_id"
-
+        List projects = getTransformedProjects(read)
         Sql write = Sql.newInstance(cnx, user, pass, 'com.mysql.jdbc.Driver')
+
+        [read: read, write: write, projects: projects, rest: rest]
+    }
+
+
+    def static populatePullRequestBodies() {
+
+        def c = setup()
+        String pid = "select id, pullreq_id pr_id from pull_requests where pull_requests.base_repo_id=? order by pr_id"
         def insert = "insert into pull_request_body values (?,?) ON DUPLICATE KEY UPDATE body=?"
 
 
-        write.connection.autoCommit = false;
-        projects.each {
+        c.write.connection.autoCommit = false;
+        c.projects.each {
             if (it.repo_id < 34) {
-                Map idmap = read.rows(pid, [it.repo_id]).collectEntries { pidrow ->
+                Map idmap = c.read.rows(pid, [it.repo_id]).collectEntries { pidrow ->
                     [pidrow.pr_id, pidrow.id]
                 }
-                Map result = getRepoPullRequests(rest, it.owner, it.repo_name);
+                Map result = getRepoPullRequests(c.rest, it.owner, it.repo_name);
                 if (result.rateLimited) {
                     log.error("Rate limited");
                     System.exit(-1);
 
                 } else {
-                    write.withBatch(insert) { ps ->
+                    c.write.withBatch(insert) { ps ->
                         result.each { k, v ->
                             ps.addBatch(idmap[k], v, v)
                         }
                     }
-                    write.commit()
+                    c.write.commit()
 
                 }
             }
@@ -284,8 +353,8 @@ class GitHubUtils {
 
         //populateLongIssueComments()
         //getCommentList()
-        populatePullRequestBodies()
-
+        //populatePullRequestBodies()
+        populateCommitComments()
 
     }
 }

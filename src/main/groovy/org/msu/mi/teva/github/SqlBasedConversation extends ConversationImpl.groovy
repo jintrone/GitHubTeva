@@ -11,6 +11,7 @@ import edu.mit.cci.teva.model.Post
 import edu.mit.cci.teva.util.TevaUtils
 import edu.mit.cci.text.preprocessing.Tokenizer
 import groovy.sql.Sql
+import org.msu.mi.teva.github.util.GitHubApiUtils
 
 /**
  * Created by josh on 1/20/14.
@@ -77,7 +78,7 @@ class SqlBasedConversation extends ConversationImpl {
     public static void main(String[] args) {
         TevaParameters tevaParams = new TevaParameters(System.getResourceAsStream("/github.teva.properties"));
         Conversation c = GitHubRunner.getRemoteBootstrapRunner().conversation
-        GitHubUtils.addIssueComments(c)
+        GitHubApiUtils.addIssueComments(c)
         GitHubTevaFactory factory = new GitHubTevaFactory(tevaParams,c)
 
         def cols = new HashMap(GitHubRunner.LOCAL_COLS)
