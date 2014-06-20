@@ -27,9 +27,9 @@ s.eachRow("select issues.repo_id, concat('T.',issues.id) thread, concat('T.',iss
 //    println it.created_ts
 //    println it.text.replaceAll("\t"," ")
 
-    CPost p = new CPost(it.id,null,it.author,it.created_ts,it.text.replaceAll("\t"," "))
+    //CPost p = new CPost(it.id,null,it.author,it.created_ts,it.text.replaceAll("\t"," "))
 
-    threads << [(it.thread):new CThread(it.repo_id,it.thread,[new CPost(it.id,null,it.author,it.created_ts,it.text.replaceAll("\t"," "))])]
+    threads << [(it.thread):new CThread(it.repo_id,it.thread,[new CPost(it.id,null,it.author,it.created_ts,it.text.replaceAll("\"","\\\\\""))])]
 }
 
 def skipped = [] as Set
@@ -39,15 +39,17 @@ s.eachRow("select concat('T.',issue_comments.issue_id) thread, issue_comments.co
         skipped << it.thread
     } else {
         def lastPostId = threads[it.thread].posts.last().id as String
-        threads[it.thread].posts << new CPost(it.id as String, lastPostId, it.author, it.created_ts, it.text?it.text.replaceAll("\t", " "):"")
+       // def text =
+        threads[it.thread].posts << new CPost(it.id as String, lastPostId, it.author, it.created_ts, it.text?it.text.replaceAll("\"","\\\\\""):"")
     }
 }
 
 new File("allGitHubIssues.tsv").withWriter { Writer out ->
-    out.println "repo_id\tthread_id\tpost_id\treplyTo_id\tcreated\tauthor\ttext"
+
+    out.println "repo_id|thread_id|post_id|replyTo_id|created|author|text"
     threads.values().each { CThread thread ->
         thread.posts.each {
-            out.println "${thread.repoId},${thread.threadId},${it}"
+            out.println "${thread.repoId}|${thread.threadId}|${it}"
         }
 
     }
@@ -94,7 +96,7 @@ class CPost {
 
 
     public String toString() {
-        "$id\t$replyTo\t$author\t${creation.time}\t$text"
+        "$id|$replyTo|$author|${creation.time}|\"$text\""
     }
 }
 
