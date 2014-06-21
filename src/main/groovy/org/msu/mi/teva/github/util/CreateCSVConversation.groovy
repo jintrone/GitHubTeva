@@ -16,6 +16,8 @@ if (args.length ==0) {
 }
 
 
+def s1 = ","
+
 def url = "jdbc:mysql://${args[0]}"
 def s = (args[2]!=null)?Sql.newInstance(url,args[1],args[2],'com.mysql.jdbc.Driver'):(args[1]?Sql.newInstance(url,args[1],"",'com.mysql.jdbc.Driver'):Sql.newInstance(url,'com.mysql.jdbc.Driver'))
 
@@ -29,7 +31,7 @@ s.eachRow("select issues.repo_id, concat('T.',issues.id) thread, concat('T.',iss
 
     //CPost p = new CPost(it.id,null,it.author,it.created_ts,it.text.replaceAll("\t"," "))
 
-    threads << [(it.thread):new CThread(it.repo_id,it.thread,[new CPost(it.id,null,it.author,it.created_ts,it.text.replaceAll("\"","\\\\\""))])]
+    threads << [(it.thread):new CThread(it.repo_id,it.thread,[new CPost(it.id,null,it.author,it.created_ts,format(it.text))])]
 }
 
 def skipped = [] as Set
@@ -40,16 +42,16 @@ s.eachRow("select concat('T.',issue_comments.issue_id) thread, issue_comments.co
     } else {
         def lastPostId = threads[it.thread].posts.last().id as String
        // def text =
-        threads[it.thread].posts << new CPost(it.id as String, lastPostId, it.author, it.created_ts, it.text?it.text.replaceAll("\"","\\\\\""):"")
+        threads[it.thread].posts << new CPost(it.id as String, lastPostId, it.author, it.created_ts, it.text?format(it.text):"")
     }
 }
 
-new File("allGitHubIssues.tsv").withWriter { Writer out ->
+new File("allGitHubIssues.csv").withWriter { Writer out ->
 
-    out.println "repo_id|thread_id|post_id|replyTo_id|created|author|text"
+    out.println "repo_id,thread_id,post_id,replyTo_id,author,created,text"
     threads.values().each { CThread thread ->
         thread.posts.each {
-            out.println "${thread.repoId}|${thread.threadId}|${it}"
+            out.println "${thread.repoId},${thread.threadId},${it}"
         }
 
     }
@@ -61,6 +63,11 @@ println "Skipped ${skipped.size()}"
 println "$skipped"
 
 
+
+
+def format(String s) {
+    s.replaceAll("[\\s,\"]+"," ")
+}
 
 
 
@@ -96,7 +103,7 @@ class CPost {
 
 
     public String toString() {
-        "$id|$replyTo|$author|${creation.time}|\"$text\""
+        "$id,$replyTo,$author,${creation.time},$text"
     }
 }
 
